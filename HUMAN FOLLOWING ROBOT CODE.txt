@@ -1,0 +1,198 @@
+#include <NewPing.h>
+#include <SoftwareSerial.h>
+
+/* -------- Bluetooth -------- */
+SoftwareSerial BT(13, 4);   // TX, RX
+bool autoMode = true;
+
+/* -------- Button & Buzzer -------- */
+#define MODE_BTN A0
+#define BUZZER   A1
+bool lastBtnState = HIGH;
+
+/* -------- Ultrasonic -------- */
+#define TRIG_PIN 11
+#define ECHO_PIN 12
+#define MAX_DISTANCE 200
+
+#define MIN_DIST 7
+#define MAX_DIST 30
+
+NewPing sonar(TRIG_PIN, ECHO_PIN, MAX_DISTANCE);
+
+/* -------- IR Sensors -------- */
+#define IR_RIGHT 2
+#define IR_LEFT  3
+
+/* -------- L298N -------- */
+#define ENA 5
+#define IN1 7
+#define IN2 8
+#define ENB 6
+#define IN3 9
+#define IN4 10
+
+/* -------- Speed -------- */
+#define BASE_SPEED 130
+#define TURN_SPEED 170
+#define STOP_SPEED 0
+
+unsigned long buzzerTimer = 0;
+bool buzzerState = false;
+
+/* -------- SETUP -------- */
+void setup() {
+  pinMode(IR_RIGHT, INPUT);
+  pinMode(IR_LEFT, INPUT);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  pinMode(MODE_BTN, INPUT_PULLUP);
+  pinMode(BUZZER, OUTPUT);
+
+  BT.begin(9600);
+  stopMotors();
+}
+
+/* -------- MAIN LOOP -------- */
+void loop() {
+
+  /* ---- MODE BUTTON ---- */
+  bool btnState = digitalRead(MODE_BTN);
+  if (btnState == LOW && lastBtnState == HIGH) {
+    autoMode = !autoMode;
+    stopMotors();
+    buzzerOff();
+
+    if (autoMode) beep(2);
+    else beep(1);
+
+    delay(300);
+  }
+  lastBtnState = btnState;
+
+  /* ---- MANUAL MODE ---- */
+  if (!autoMode && BT.available()) {
+    char cmd = BT.read();
+
+    switch (cmd) {
+
+      case 'F':
+        buzzerOff();
+        moveForward();
+        break;
+
+      case 'B':   // 🚨 BACKWARD BUZZER (ALWAYS)
+        moveBackward();
+        reverseBeep();
+        break;
+
+      case 'L':
+        buzzerOff();
+        turnLeft();
+        break;
+
+      case 'R':
+        buzzerOff();
+        turnRight();
+        break;
+
+      case 'Y':   // 🔔 HORN
+        digitalWrite(BUZZER, HIGH);
+        break;
+
+      case 'S':
+        buzzerOff();
+        stopMotors();
+        break;
+    }
+  }
+
+  /* ---- AUTO MODE ---- */
+  if (autoMode) {
+    buzzerOff();
+    followMe();
+  }
+}
+
+/* -------- FOLLOW MODE -------- */
+void followMe() {
+  int d = sonar.ping_cm();
+  if (d == 0) d = 100;
+
+  int r = digitalRead(IR_RIGHT);
+  int l = digitalRead(IR_LEFT);
+
+  if (r == LOW && l == HIGH) turnRight();
+  else if (r == HIGH && l == LOW) turnLeft();
+  else if (r == LOW && l == LOW) stopMotors();
+  else if (d >= MIN_DIST && d <= MAX_DIST) moveForward();
+  else stopMotors();
+
+  delay(25);
+}
+
+/* -------- BUZZER -------- */
+void reverseBeep() {   // fast reverse beep
+  if (millis() - buzzerTimer >= 120) {
+    buzzerTimer = millis();
+    buzzerState = !buzzerState;
+    digitalWrite(BUZZER, buzzerState);
+  }
+}
+
+void buzzerOff() {
+  digitalWrite(BUZZER, LOW);
+  buzzerState = false;
+}
+
+/* -------- MODE CHANGE BEEP -------- */
+void beep(int count) {
+  for (int i = 0; i < count; i++) {
+    digitalWrite(BUZZER, HIGH);
+    delay(120);
+    digitalWrite(BUZZER, LOW);
+    delay(120);
+  }
+}
+
+/* -------- MOTORS -------- */
+void moveForward() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  analogWrite(ENA, BASE_SPEED);
+  analogWrite(ENB, BASE_SPEED);
+}
+
+void moveBackward() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  analogWrite(ENA, BASE_SPEED);
+  analogWrite(ENB, BASE_SPEED);
+}
+
+void turnLeft() {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH);
+  analogWrite(ENA, TURN_SPEED);
+  analogWrite(ENB, TURN_SPEED);
+}
+
+void turnRight() {
+  digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  analogWrite(ENA, TURN_SPEED);
+  analogWrite(ENB, TURN_SPEED);
+}
+
+void stopMotors() {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, LOW);
+  analogWrite(ENA, STOP_SPEED);
+  analogWrite(ENB, STOP_SPEED);
+}
